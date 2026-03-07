@@ -1,31 +1,83 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api/client";
-import StatCard from "../components/StatCard";
 import { money, shortDate } from "../utils/format";
+
+const rangeOptions = [
+  { key: "weekly", label: "Weekly", days: 7 },
+  { key: "monthly", label: "Monthly", days: 30 },
+  { key: "quarterly", label: "Quarterly", days: 90 },
+  { key: "yearly", label: "Yearly", days: 365 }
+];
+
+const getStartDateByRange = (range) => {
+  const option = rangeOptions.find((item) => item.key === range) || rangeOptions[1];
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - option.days + 1);
+  return start;
+};
 
 const DashboardPage = () => {
   const [analytics, setAnalytics] = useState(null);
-  const [categories, setCategories] = useState([]);
-  const [movement, setMovement] = useState({ fastMoving: [], slowMoving: [] });
+  const [sales, setSales] = useState([]);
+  const [medicines, setMedicines] = useState([]);
+  const [range, setRange] = useState("monthly");
   const [alerts, setAlerts] = useState({ lowStock: [], expiringSoon: [], expired: [], outOfStock: [] });
 
   useEffect(() => {
     const load = async () => {
-      const [analyticsRes, categoryRes, movementRes, alertsRes] = await Promise.all([
+      const [analyticsRes, alertsRes, salesRes, medicinesRes] = await Promise.all([
         api.get("/analytics/dashboard"),
-        api.get("/analytics/sales-categories"),
-        api.get("/analytics/movement"),
-        api.get("/medicines/alerts?days=90")
+        api.get("/medicines/alerts?days=90"),
+        api.get("/sales"),
+        api.get("/medicines")
       ]);
+
       setAnalytics(analyticsRes.data);
-      setCategories(categoryRes.data);
-      setMovement(movementRes.data);
       setAlerts(alertsRes.data);
+      setSales(salesRes.data);
+      setMedicines(medicinesRes.data);
     };
 
     load();
   }, []);
+
+  const periodAnalytics = useMemo(() => {
+    const startDate = getStartDateByRange(range);
+    const filteredSales = sales.filter((sale) => new Date(sale.soldAt) >= startDate);
+
+    const bestSellingMap = {};
+    const salesByCategoryMap = {};
+    const medicineCategoryMap = medicines.reduce((acc, medicine) => {
+      acc[String(medicine._id)] = medicine.category;
+      return acc;
+    }, {});
+
+    filteredSales.forEach((sale) => {
+      sale.items.forEach((item) => {
+        const medicineName = item.medicineName || "Unknown";
+        const medicineId = String(item.medicine || "");
+        const category = medicineCategoryMap[medicineId] || "Uncategorized";
+
+        bestSellingMap[medicineName] = (bestSellingMap[medicineName] || 0) + Number(item.quantity || 0);
+        salesByCategoryMap[category] = (salesByCategoryMap[category] || 0) + Number(item.lineTotal || 0);
+      });
+    });
+
+    const bestSelling = Object.entries(bestSellingMap)
+      .map(([name, quantitySold]) => ({ name, quantitySold }))
+      .sort((a, b) => b.quantitySold - a.quantitySold)
+      .slice(0, 8);
+
+    const salesByCategory = Object.entries(salesByCategoryMap)
+      .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total);
+
+    const fastMoving = [...bestSelling];
+
+    return { bestSelling, salesByCategory, fastMoving };
+  }, [range, sales, medicines]);
 
   if (!analytics) {
     return <div className="card">Loading dashboard...</div>;
@@ -33,74 +85,6 @@ const DashboardPage = () => {
 
   return (
     <div className="grid gap-4">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Daily Sales" value={money(analytics.salesAnalytics.dailySales)} />
-        <StatCard title="Weekly Sales" value={money(analytics.salesAnalytics.weeklySales)} />
-        <StatCard title="Monthly Revenue" value={money(analytics.salesAnalytics.monthlyRevenue)} />
-        <StatCard title="Estimated Profit" value={money(analytics.financialInsights.estimatedProfit)} />
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="card h-80">
-          <h2 className="mb-4 text-lg font-semibold">Best Selling Medicines</h2>
-          <ResponsiveContainer width="100%" height="85%">
-            <BarChart data={analytics.salesAnalytics.bestSellingMedicines}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="_id" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="quantitySold" fill="#15803d" radius={6} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="card h-80">
-          <h2 className="mb-4 text-lg font-semibold">Sales By Category</h2>
-          <ResponsiveContainer width="100%" height="85%">
-            <PieChart>
-              <Pie data={categories} dataKey="total" nameKey="category" outerRadius={100} fill="#16a34a" />
-              <Tooltip formatter={(value) => money(value)} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="card h-80">
-          <h2 className="mb-4 text-lg font-semibold">Sales By Staff</h2>
-          {analytics.salesAnalytics.salesByStaff?.length > 0 ? (
-            <ResponsiveContainer width="100%" height="85%">
-              <BarChart data={analytics.salesAnalytics.salesByStaff}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="staffName" />
-                <YAxis />
-                <Tooltip formatter={(value) => money(value)} />
-                <Bar dataKey="totalSales" fill="#15803d" radius={6} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No staff sales data yet.</p>
-          )}
-        </div>
-
-        <div className="card h-80">
-          <h2 className="mb-4 text-lg font-semibold">Fast Moving Medicines (30 days)</h2>
-          {movement.fastMoving?.length > 0 ? (
-            <ResponsiveContainer width="100%" height="85%">
-              <BarChart data={movement.fastMoving.slice(0, 8)}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="medicineName" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="soldQty" fill="#0f766e" radius={6} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No movement data yet.</p>
-          )}
-        </div>
-      </section>
-
       <section className="grid gap-4 lg:grid-cols-3">
         <div className="card">
           <h3 className="text-base font-semibold">Low Stock</h3>
@@ -137,6 +121,80 @@ const DashboardPage = () => {
               <li className="text-slate-500 dark:text-slate-400">No out-of-stock medicines.</li>
             )}
           </ul>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Analytics Range</h2>
+          <div className="flex flex-wrap gap-2">
+            {rangeOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setRange(option.key)}
+                className={`rounded-lg px-3 py-2 text-sm ${
+                  range === option.key
+                    ? "bg-brand-600 text-white"
+                    : "border border-slate-300 dark:border-slate-600"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="card h-80">
+          <h2 className="mb-4 text-lg font-semibold">Best Selling Medicines</h2>
+          {periodAnalytics.bestSelling.length > 0 ? (
+            <ResponsiveContainer width="100%" height="85%">
+              <BarChart data={periodAnalytics.bestSelling}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="quantitySold" fill="#15803d" radius={6} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">No data in selected period.</p>
+          )}
+        </div>
+
+        <div className="card h-80">
+          <h2 className="mb-4 text-lg font-semibold">Sales By Category</h2>
+          {periodAnalytics.salesByCategory.length > 0 ? (
+            <ResponsiveContainer width="100%" height="85%">
+              <PieChart>
+                <Pie data={periodAnalytics.salesByCategory} dataKey="total" nameKey="category" outerRadius={100} fill="#16a34a" />
+                <Tooltip formatter={(value) => money(value)} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">No data in selected period.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="grid gap-4">
+        <div className="card h-80">
+          <h2 className="mb-4 text-lg font-semibold">Fast Moving Medicines</h2>
+          {periodAnalytics.fastMoving.length > 0 ? (
+            <ResponsiveContainer width="100%" height="85%">
+              <BarChart data={periodAnalytics.fastMoving}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="quantitySold" fill="#0f766e" radius={6} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">No data in selected period.</p>
+          )}
         </div>
       </section>
     </div>
