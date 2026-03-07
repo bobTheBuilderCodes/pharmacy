@@ -1,5 +1,15 @@
 import { Medicine } from "../models/Medicine.js";
 
+const normalizeMedicinePayload = (payload) => {
+  const normalized = { ...payload };
+
+  if (normalized.supplier === "") {
+    normalized.supplier = undefined;
+  }
+
+  return normalized;
+};
+
 const buildMedicineFilter = ({ search, category, supplier, expiryFrom, expiryTo }) => {
   const filter = {};
 
@@ -26,7 +36,7 @@ const buildMedicineFilter = ({ search, category, supplier, expiryFrom, expiryTo 
 
 export const createMedicine = async (req, res, next) => {
   try {
-    const medicine = await Medicine.create(req.body);
+    const medicine = await Medicine.create(normalizeMedicinePayload(req.body));
     const populated = await medicine.populate("supplier", "supplierName phoneNumber");
     res.status(201).json(populated);
   } catch (error) {
@@ -60,7 +70,13 @@ export const getMedicine = async (req, res, next) => {
 
 export const updateMedicine = async (req, res, next) => {
   try {
-    const medicine = await Medicine.findByIdAndUpdate(req.params.id, req.body, {
+    const updatePayload = normalizeMedicinePayload(req.body);
+    const updateQuery =
+      updatePayload.supplier === undefined
+        ? { ...updatePayload, $unset: { supplier: 1 } }
+        : updatePayload;
+
+    const medicine = await Medicine.findByIdAndUpdate(req.params.id, updateQuery, {
       new: true,
       runValidators: true
     }).populate("supplier", "supplierName");

@@ -6,11 +6,10 @@ This repository contains a full-stack pharmacy management system with separate f
 
 - Frontend: React + Vite + TailwindCSS + Recharts
 - Backend: Node.js + Express + MongoDB + JWT
-- Reports: CSV exports and PDF profit report
 
 ## Project Structure
 
-- `frontend/` React app with dashboard, inventory, POS, suppliers, purchases, reports, dark/light mode
+- `frontend/` React app with dashboard, inventory, POS, suppliers, purchases, dark/light mode
 - `backend/` Express API with auth, inventory, sales, suppliers, purchases, analytics, notifications endpoints
 
 ## Features Implemented
@@ -29,11 +28,6 @@ This repository contains a full-stack pharmacy management system with separate f
   - Sales by staff
   - Low stock, expired medicines, inventory value
   - Revenue/cost/profit summary
-- Report exports:
-  - Sales report (CSV)
-  - Inventory report (CSV)
-  - Expiry report (CSV)
-  - Profit report (PDF)
 - Tailwind-based responsive UI with light/dark mode toggle
 
 ## Backend Setup
@@ -105,10 +99,6 @@ These are controlled by backend env values:
 - `GET /api/analytics/dashboard`
 - `GET /api/analytics/sales-categories`
 - `GET /api/analytics/movement`
-- `GET /api/reports/sales.csv`
-- `GET /api/reports/inventory.csv`
-- `GET /api/reports/expiry.csv`
-- `GET /api/reports/profit.pdf`
 
 ## Notes
 

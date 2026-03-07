@@ -32,14 +32,19 @@ const LoginPage = () => {
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Sign in with your account.</p>
 
         <div className="mt-4 grid gap-3">
-          <input className="input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input
-            className="input"
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <div>
+            <label className="mb-1 block text-sm font-medium">Email</label>
+            <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Password</label>
+            <input
+              className="input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <button className="button" type="submit" disabled={loading}>
             {loading ? "Signing in..." : "Sign in"}

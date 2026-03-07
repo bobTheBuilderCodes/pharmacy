@@ -1,14 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import Modal from "../components/Modal";
+import StatCard from "../components/StatCard";
 import { money, shortDate } from "../utils/format";
+
+const paymentLabel = {
+  cash: "Cash",
+  mobile_money: "Mobile Money",
+  card: "Card"
+};
 
 const SalesPage = () => {
   const [medicines, setMedicines] = useState([]);
   const [sales, setSales] = useState([]);
-  const [search, setSearch] = useState("");
-  const [cart, setCart] = useState([]);
+  const [paymentFilter, setPaymentFilter] = useState("all");
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [medicineQuery, setMedicineQuery] = useState("");
+  const [selectedMedicineId, setSelectedMedicineId] = useState("");
+  const [quantity, setQuantity] = useState(1);
+  const [saleError, setSaleError] = useState("");
 
   const load = async () => {
     const [medRes, salesRes] = await Promise.all([api.get("/medicines"), api.get("/sales")]);
@@ -20,98 +32,120 @@ const SalesPage = () => {
     load();
   }, []);
 
-  const filteredMeds = useMemo(
-    () => medicines.filter((m) => m.medicineName.toLowerCase().includes(search.toLowerCase())),
-    [medicines, search]
+  const selectedMedicine = useMemo(
+    () => medicines.find((medicine) => medicine._id === selectedMedicineId),
+    [medicines, selectedMedicineId]
   );
 
-  const addToCart = (med) => {
-    setCart((prev) => {
-      const existing = prev.find((item) => item.medicineId === med._id);
-      if (existing) {
-        return prev.map((item) =>
-          item.medicineId === med._id ? { ...item, quantity: Math.min(item.quantity + 1, med.quantityInStock) } : item
-        );
-      }
-      return [...prev, { medicineId: med._id, name: med.medicineName, quantity: 1, unitPrice: med.sellingPrice }];
-    });
+  const filteredSales = useMemo(
+    () => sales.filter((sale) => (paymentFilter === "all" ? true : sale.paymentMethod === paymentFilter)),
+    [sales, paymentFilter]
+  );
+
+  const salesSummary = useMemo(() => {
+    const now = new Date();
+
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfWeek.getDate() - 6);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    const sumFrom = (startDate) =>
+      filteredSales
+        .filter((sale) => new Date(sale.soldAt) >= startDate)
+        .reduce((total, sale) => total + Number(sale.totalAmount || 0), 0);
+
+    return {
+      today: sumFrom(startOfDay),
+      week: sumFrom(startOfWeek),
+      month: sumFrom(startOfMonth),
+      year: sumFrom(startOfYear)
+    };
+  }, [filteredSales]);
+
+  const handleMedicineSearch = (value) => {
+    setMedicineQuery(value);
+    const match = medicines.find((medicine) => medicine.medicineName.toLowerCase() === value.trim().toLowerCase());
+    setSelectedMedicineId(match?._id || "");
   };
 
-  const changeQty = (medicineId, quantity) => {
-    setCart((prev) => prev.map((item) => (item.medicineId === medicineId ? { ...item, quantity: Number(quantity) } : item)));
+  const openSaleModal = () => {
+    setDiscount(0);
+    setPaymentMethod("cash");
+    setMedicineQuery("");
+    setSelectedMedicineId("");
+    setQuantity(1);
+    setSaleError("");
+    setIsAddOpen(true);
   };
 
-  const subtotal = cart.reduce((acc, item) => acc + item.unitPrice * item.quantity, 0);
-  const total = Math.max(subtotal - Number(discount || 0), 0);
+  const grossTotal = selectedMedicine ? selectedMedicine.sellingPrice * Number(quantity || 0) : 0;
+  const total = Math.max(grossTotal - Number(discount || 0), 0);
 
-  const checkout = async () => {
-    if (cart.length === 0) return;
+  const createSale = async () => {
+    setSaleError("");
+
+    if (!selectedMedicine) {
+      setSaleError("Select a medicine from the dropdown list.");
+      return;
+    }
+
+    const qty = Number(quantity || 0);
+    if (!qty || qty < 1) {
+      setSaleError("Quantity must be at least 1.");
+      return;
+    }
+
+    if (qty > selectedMedicine.quantityInStock) {
+      setSaleError("Requested quantity exceeds available stock.");
+      return;
+    }
 
     await api.post("/sales", {
-      items: cart.map((item) => ({ medicineId: item.medicineId, quantity: item.quantity })),
+      items: [{ medicineId: selectedMedicine._id, quantity: qty }],
       discount: Number(discount || 0),
       paymentMethod
     });
 
-    setCart([]);
     setDiscount(0);
+    setPaymentMethod("cash");
+    setMedicineQuery("");
+    setSelectedMedicineId("");
+    setQuantity(1);
+    setSaleError("");
+    setIsAddOpen(false);
     await load();
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="card lg:col-span-2">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">POS - Medicines</h2>
-          <input className="input max-w-xs" placeholder="Search medicine" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
+    <>
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard title="Sales Today" value={money(salesSummary.today)} />
+        <StatCard title="Sales This Week" value={money(salesSummary.week)} />
+        <StatCard title="Sales This Month" value={money(salesSummary.month)} />
+        <StatCard title="Sales This Year" value={money(salesSummary.year)} />
+      </section>
 
-        <div className="grid gap-2 md:grid-cols-2">
-          {filteredMeds.slice(0, 30).map((med) => (
-            <button
-              key={med._id}
-              onClick={() => addToCart(med)}
-              className="rounded-lg border border-slate-200 p-3 text-left hover:border-brand-600 dark:border-slate-700"
-              disabled={med.quantityInStock === 0}
-            >
-              <p className="font-medium">{med.medicineName}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{med.category}</p>
-              <p className="text-sm">{money(med.sellingPrice)} | Stock: {med.quantityInStock}</p>
+      <div className="card mt-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Recent Sales</h2>
+          <div className="flex items-center gap-2">
+            <select className="input" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+              <option value="all">All Payments</option>
+              <option value="cash">Cash</option>
+              <option value="mobile_money">Mobile Money</option>
+              <option value="card">Card</option>
+            </select>
+            <button className="button" type="button" onClick={openSaleModal}>
+              Add Sale
             </button>
-          ))}
+          </div>
         </div>
-      </div>
 
-      <div className="card">
-        <h2 className="text-lg font-semibold">Cart</h2>
-        <div className="mt-3 grid gap-2">
-          {cart.map((item) => (
-            <div key={item.medicineId} className="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-              <p className="text-sm font-medium">{item.name}</p>
-              <div className="mt-2 flex items-center gap-2">
-                <input className="input" type="number" min="1" value={item.quantity} onChange={(e) => changeQty(item.medicineId, e.target.value)} />
-                <p className="text-sm">{money(item.unitPrice * item.quantity)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 grid gap-2">
-          <input className="input" type="number" placeholder="Discount" value={discount} onChange={(e) => setDiscount(e.target.value)} />
-          <select className="input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-            <option value="cash">Cash</option>
-            <option value="mobile_money">Mobile Money</option>
-            <option value="card">Card</option>
-          </select>
-          <p className="text-sm">Subtotal: {money(subtotal)}</p>
-          <p className="text-sm font-semibold">Total: {money(total)}</p>
-          <button className="button" onClick={checkout}>
-            Complete Sale
-          </button>
-        </div>
-      </div>
-
-      <div className="card lg:col-span-3">
-        <h2 className="mb-3 text-lg font-semibold">Recent Sales</h2>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead>
@@ -125,21 +159,90 @@ const SalesPage = () => {
               </tr>
             </thead>
             <tbody>
-              {sales.map((sale) => (
-                <tr key={sale._id} className="border-b border-slate-100 dark:border-slate-800">
-                  <td className="p-2">{sale.saleId}</td>
-                  <td className="p-2">{shortDate(sale.soldAt)}</td>
-                  <td className="p-2">{sale.items.length}</td>
-                  <td className="p-2">{sale.paymentMethod}</td>
-                  <td className="p-2">{money(sale.totalAmount)}</td>
-                  <td className="p-2">{sale.salesperson?.name || "-"}</td>
+              {filteredSales.length > 0 ? (
+                filteredSales.map((sale) => (
+                  <tr key={sale._id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="p-2">{sale.saleId}</td>
+                    <td className="p-2">{shortDate(sale.soldAt)}</td>
+                    <td className="p-2">{sale.items.length}</td>
+                    <td className="p-2">{paymentLabel[sale.paymentMethod] || sale.paymentMethod}</td>
+                    <td className="p-2">{money(sale.totalAmount)}</td>
+                    <td className="p-2">{sale.salesperson?.name || "-"}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="p-6 text-center text-slate-500 dark:text-slate-400" colSpan={6}>
+                    {paymentFilter === "all"
+                      ? "No sales recorded yet. Click Add Sale to create one."
+                      : "No sales found for the selected payment type."}
+                  </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
       </div>
-    </div>
+
+      <Modal title="Add Sale" isOpen={isAddOpen} onClose={() => setIsAddOpen(false)}>
+        <div className="grid gap-2 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Medicine</label>
+            <input
+              className="input"
+              list="medicine-options"
+              value={medicineQuery}
+              onChange={(e) => handleMedicineSearch(e.target.value)}
+              placeholder="Search and select medicine"
+            />
+            <datalist id="medicine-options">
+              {medicines.map((medicine) => (
+                <option
+                  key={medicine._id}
+                  value={medicine.medicineName}
+                  label={`${medicine.category} | ${money(medicine.sellingPrice)} | Stock ${medicine.quantityInStock}`}
+                />
+              ))}
+            </datalist>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">Selling Price</label>
+            <input className="input" readOnly value={selectedMedicine ? money(selectedMedicine.sellingPrice) : "-"} />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">Quantity</label>
+            <input className="input" type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">Discount</label>
+            <input className="input" type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">Payment Method</label>
+            <select className="input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+              <option value="cash">Cash</option>
+              <option value="mobile_money">Mobile Money</option>
+              <option value="card">Card</option>
+            </select>
+          </div>
+
+          <div className="md:col-span-2 grid gap-1 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
+            <p>Gross Total: {money(grossTotal)}</p>
+            <p>Net Total: {money(total)}</p>
+          </div>
+
+          {saleError ? <p className="md:col-span-2 text-sm text-red-600">{saleError}</p> : null}
+
+          <button className="button md:col-span-2" onClick={createSale} type="button">
+            Complete Sale
+          </button>
+        </div>
+      </Modal>
+    </>
   );
 };
 

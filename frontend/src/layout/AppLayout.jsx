@@ -1,19 +1,41 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import ThemeToggle from "../components/ThemeToggle";
 import { useAuth } from "../context/AuthContext";
 
 const navItems = [
   { to: "/", label: "Dashboard" },
-  { to: "/medicines", label: "Medicines" },
+  { to: "/medicines", label: "Medicine" },
   { to: "/sales", label: "Sales POS" },
   { to: "/suppliers", label: "Suppliers" },
-  { to: "/purchases", label: "Purchases" },
-  { to: "/reports", label: "Reports" }
+  { to: "/purchases", label: "Purchases" }
 ];
 
 const AppLayout = ({ children }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  const userInitials = useMemo(() => {
+    if (!user?.name) return "U";
+    return user.name
+      .split(" ")
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("");
+  }, [user?.name]);
+
+  useEffect(() => {
+    if (!isUserMenuOpen) return;
+    const onClick = (event) => {
+      if (!menuRef.current?.contains(event.target)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [isUserMenuOpen]);
 
   const handleLogout = () => {
     logout();
@@ -29,9 +51,31 @@ const AppLayout = ({ children }) => {
           </Link>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <button onClick={handleLogout} className="button-muted" type="button">
-              Logout
-            </button>
+            <div className="relative" ref={menuRef}>
+              <button
+                type="button"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white"
+                onClick={() => setIsUserMenuOpen((value) => !value)}
+              >
+                {userInitials}
+              </button>
+
+              <div
+                className={`absolute right-0 top-12 z-40 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg transition dark:border-slate-700 dark:bg-slate-800 ${
+                  isUserMenuOpen ? "visible opacity-100" : "invisible opacity-0"
+                }`}
+              >
+                <p className="text-sm font-semibold">{user?.name}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {user?.email} | {user?.role}
+                </p>
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button onClick={handleLogout} className="button-muted" type="button">
+                    Logout
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -39,7 +83,7 @@ const AppLayout = ({ children }) => {
       <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[220px_1fr]">
         <aside className="card h-fit">
           <p className="mb-4 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            {user?.name} ({user?.role})
+            Navigation
           </p>
           <nav className="grid gap-1">
             {navItems.map((item) => (
