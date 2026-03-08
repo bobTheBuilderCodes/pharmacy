@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import Modal from "../components/Modal";
+import Spinner from "../components/Spinner";
+import { useToast } from "../context/ToastContext";
 import { money, shortDate } from "../utils/format";
 
 const initialForm = {
@@ -20,17 +22,27 @@ const PurchasesPage = () => {
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(initialForm);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const { showToast } = useToast();
 
   const load = async () => {
-    const [purchaseRes, supplierRes, medicineRes] = await Promise.all([
-      api.get("/purchases"),
-      api.get("/suppliers"),
-      api.get("/medicines")
-    ]);
+    try {
+      setLoading(true);
+      const [purchaseRes, supplierRes, medicineRes] = await Promise.all([
+        api.get("/purchases"),
+        api.get("/suppliers"),
+        api.get("/medicines")
+      ]);
 
-    setPurchases(purchaseRes.data);
-    setSuppliers(supplierRes.data);
-    setMedicines(medicineRes.data);
+      setPurchases(purchaseRes.data);
+      setSuppliers(supplierRes.data);
+      setMedicines(medicineRes.data);
+    } catch {
+      showToast("Failed to load purchases.", "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -39,14 +51,22 @@ const PurchasesPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await api.post("/purchases", {
-      ...form,
-      quantity: Number(form.quantity),
-      purchasePrice: Number(form.purchasePrice)
-    });
-    setForm(initialForm);
-    setIsAddOpen(false);
-    await load();
+    try {
+      setSubmitting(true);
+      await api.post("/purchases", {
+        ...form,
+        quantity: Number(form.quantity),
+        purchasePrice: Number(form.purchasePrice)
+      });
+      showToast("Purchase recorded successfully.", "success");
+      setForm(initialForm);
+      setIsAddOpen(false);
+      await load();
+    } catch (error) {
+      showToast(error.response?.data?.message || "Failed to record purchase.", "error");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const filteredPurchases = useMemo(
@@ -91,7 +111,16 @@ const PurchasesPage = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredPurchases.length > 0 ? (
+            {loading ? (
+              <tr>
+                <td className="p-6" colSpan={6}>
+                  <div className="flex items-center justify-center gap-2">
+                    <Spinner />
+                    <span className="text-sm text-slate-500 dark:text-slate-400">Loading purchases...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : filteredPurchases.length > 0 ? (
               filteredPurchases.map((p) => (
                 <tr key={p._id} className="border-b border-slate-100 dark:border-slate-800">
                   <td className="p-2">{p.purchaseId}</td>
@@ -159,7 +188,9 @@ const PurchasesPage = () => {
             <label className="mb-1 block text-sm font-medium">Purchase Date</label>
             <input className="input" type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
           </div>
-          <button className="button md:col-span-2">Save Purchase</button>
+          <button className="button md:col-span-2" disabled={submitting}>
+            {submitting ? "Saving..." : "Save Purchase"}
+          </button>
         </form>
       </Modal>
     </div>

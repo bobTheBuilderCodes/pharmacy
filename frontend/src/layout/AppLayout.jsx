@@ -2,17 +2,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import ThemeToggle from "../components/ThemeToggle";
 import { useAuth } from "../context/AuthContext";
+import { useSettings } from "../context/SettingsContext";
 
 const navItems = [
   { to: "/", label: "Dashboard" },
   { to: "/medicines", label: "Medicine" },
   { to: "/sales", label: "Sales POS" },
   { to: "/suppliers", label: "Suppliers" },
-  { to: "/purchases", label: "Purchases" }
+  { to: "/purchases", label: "Purchases" },
+  { to: "/settings", label: "Settings" }
 ];
 
 const AppLayout = ({ children }) => {
   const { user, logout } = useAuth();
+  const { settings } = useSettings();
   const navigate = useNavigate();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -47,7 +50,14 @@ const AppLayout = ({ children }) => {
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-700 dark:bg-slate-800/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <Link to="/" className="text-lg font-bold text-brand-600 dark:text-brand-100">
-            Pharmacy Manager
+            <span className="inline-flex items-center gap-2">
+              <img
+                src={settings.logoUrl || "/default-pharmacy-logo.svg"}
+                alt="Pharmacy logo"
+                className="h-7 w-7 rounded object-cover"
+              />
+              {settings.pharmacyName || "Pharmacy Manager"}
+            </span>
           </Link>
           <div className="flex items-center gap-2">
             <ThemeToggle />

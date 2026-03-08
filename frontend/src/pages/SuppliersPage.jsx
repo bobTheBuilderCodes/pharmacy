@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import Modal from "../components/Modal";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal";
+import Spinner from "../components/Spinner";
+import { useToast } from "../context/ToastContext";
 
 const initialForm = {
   supplierName: "",
@@ -16,10 +19,22 @@ const SuppliersPage = () => {
   const [form, setForm] = useState(initialForm);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const { showToast } = useToast();
 
   const load = async () => {
-    const { data } = await api.get("/suppliers");
-    setSuppliers(data);
+    try {
+      setLoading(true);
+      const { data } = await api.get("/suppliers");
+      setSuppliers(data);
+    } catch {
+      showToast("Failed to load suppliers.", "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -47,21 +62,44 @@ const SuppliersPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (editingSupplierId) {
-      await api.put(`/suppliers/${editingSupplierId}`, form);
-    } else {
-      await api.post("/suppliers", form);
-    }
+    try {
+      setSubmitting(true);
+      if (editingSupplierId) {
+        await api.put(`/suppliers/${editingSupplierId}`, form);
+        showToast("Supplier updated successfully.", "success");
+      } else {
+        await api.post("/suppliers", form);
+        showToast("Supplier added successfully.", "success");
+      }
 
-    setForm(initialForm);
-    setEditingSupplierId(null);
-    setIsModalOpen(false);
-    await load();
+      setForm(initialForm);
+      setEditingSupplierId(null);
+      setIsModalOpen(false);
+      await load();
+    } catch (error) {
+      showToast(error.response?.data?.message || "Failed to save supplier.", "error");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const remove = async (id) => {
-    await api.delete(`/suppliers/${id}`);
-    await load();
+  const requestDelete = (supplier) => {
+    setPendingDelete({ id: supplier._id, name: supplier.supplierName });
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete?.id) return;
+    try {
+      setDeletingId(pendingDelete.id);
+      await api.delete(`/suppliers/${pendingDelete.id}`);
+      showToast("Supplier deleted.", "success");
+      await load();
+    } catch (error) {
+      showToast(error.response?.data?.message || "Failed to delete supplier.", "error");
+    } finally {
+      setDeletingId("");
+      setPendingDelete(null);
+    }
   };
 
   const filteredSuppliers = useMemo(
@@ -105,7 +143,16 @@ const SuppliersPage = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredSuppliers.length > 0 ? (
+            {loading ? (
+              <tr>
+                <td className="p-6" colSpan={5}>
+                  <div className="flex items-center justify-center gap-2">
+                    <Spinner />
+                    <span className="text-sm text-slate-500 dark:text-slate-400">Loading suppliers...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : filteredSuppliers.length > 0 ? (
               filteredSuppliers.map((s) => (
                 <tr key={s._id} className="border-b border-slate-100 dark:border-slate-800">
                   <td className="p-2">{s.supplierName}</td>
@@ -114,11 +161,11 @@ const SuppliersPage = () => {
                   <td className="p-2">{s.email || "-"}</td>
                   <td className="p-2">
                     <div className="flex gap-2">
-                      <button className="button-muted" onClick={() => openEditModal(s)} type="button">
+                      <button className="button-muted" onClick={() => openEditModal(s)} type="button" disabled={submitting || !!deletingId}>
                         Edit
                       </button>
-                      <button className="button-muted" onClick={() => remove(s._id)} type="button">
-                        Delete
+                      <button className="button-muted" onClick={() => requestDelete(s)} type="button" disabled={submitting || !!deletingId}>
+                        {deletingId === s._id ? "Deleting..." : "Delete"}
                       </button>
                     </div>
                   </td>
@@ -161,9 +208,20 @@ const SuppliersPage = () => {
             <label className="mb-1 block text-sm font-medium">Address</label>
             <textarea className="input" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </div>
-          <button className="button">{editingSupplierId ? "Update Supplier" : "Save Supplier"}</button>
+          <button className="button" disabled={submitting}>
+            {submitting ? "Saving..." : editingSupplierId ? "Update Supplier" : "Save Supplier"}
+          </button>
         </form>
       </Modal>
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDelete)}
+        title="Delete Supplier"
+        message={`Are you sure you want to delete ${pendingDelete?.name || "this supplier"}?`}
+        loading={Boolean(deletingId)}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 };

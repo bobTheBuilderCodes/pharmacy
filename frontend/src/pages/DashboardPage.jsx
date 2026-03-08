@@ -1,199 +1,297 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 import { api } from "../api/client";
-import { money, shortDate } from "../utils/format";
+import LoadingState from "../components/LoadingState";
+import StatCard from "../components/StatCard";
+import { useAuth } from "../context/AuthContext";
+import { money } from "../utils/format";
 
-const rangeOptions = [
-  { key: "weekly", label: "Weekly", days: 7 },
-  { key: "monthly", label: "Monthly", days: 30 },
-  { key: "quarterly", label: "Quarterly", days: 90 },
-  { key: "yearly", label: "Yearly", days: 365 }
+const analyticsTabs = [
+  { key: "best_selling", label: "Best Selling Medicines" },
+  { key: "sales_vs_purchases", label: "Sales vs Purchases" }
 ];
 
-const getStartDateByRange = (range) => {
-  const option = rangeOptions.find((item) => item.key === range) || rangeOptions[1];
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - option.days + 1);
-  return start;
-};
+const periodTabs = [
+  { key: "monthly", label: "Monthly" },
+  { key: "quarterly", label: "Quarterly" }
+];
+
+const monthKeys = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const quarterKeys = ["Q1", "Q2", "Q3", "Q4"];
+const lineColors = ["#15803d", "#0f766e", "#2563eb", "#9333ea", "#c2410c", "#be123c", "#0891b2", "#4f46e5"];
 
 const DashboardPage = () => {
-  const [analytics, setAnalytics] = useState(null);
+  const { user } = useAuth();
   const [sales, setSales] = useState([]);
-  const [medicines, setMedicines] = useState([]);
-  const [range, setRange] = useState("monthly");
+  const [purchases, setPurchases] = useState([]);
   const [alerts, setAlerts] = useState({ lowStock: [], expiringSoon: [], expired: [], outOfStock: [] });
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [activeTab, setActiveTab] = useState("best_selling");
+  const [periodMode, setPeriodMode] = useState("monthly");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      const [analyticsRes, alertsRes, salesRes, medicinesRes] = await Promise.all([
-        api.get("/analytics/dashboard"),
-        api.get("/medicines/alerts?days=90"),
-        api.get("/sales"),
-        api.get("/medicines")
-      ]);
-
-      setAnalytics(analyticsRes.data);
-      setAlerts(alertsRes.data);
-      setSales(salesRes.data);
-      setMedicines(medicinesRes.data);
+      try {
+        setLoading(true);
+        const [salesRes, purchasesRes, alertsRes] = await Promise.all([
+          api.get("/sales"),
+          api.get("/purchases"),
+          api.get("/medicines/alerts?days=90")
+        ]);
+        setSales(salesRes.data);
+        setPurchases(purchasesRes.data);
+        setAlerts(alertsRes.data);
+      } finally {
+        setLoading(false);
+      }
     };
 
     load();
   }, []);
 
-  const periodAnalytics = useMemo(() => {
-    const startDate = getStartDateByRange(range);
-    const filteredSales = sales.filter((sale) => new Date(sale.soldAt) >= startDate);
+  const yearOptions = useMemo(() => {
+    const years = new Set([new Date().getFullYear()]);
+    sales.forEach((sale) => years.add(new Date(sale.soldAt).getFullYear()));
+    purchases.forEach((purchase) => years.add(new Date(purchase.purchaseDate).getFullYear()));
+    return [...years].sort((a, b) => b - a);
+  }, [sales, purchases]);
 
-    const bestSellingMap = {};
-    const salesByCategoryMap = {};
-    const medicineCategoryMap = medicines.reduce((acc, medicine) => {
-      acc[String(medicine._id)] = medicine.category;
-      return acc;
-    }, {});
+  const salesInYear = useMemo(
+    () => sales.filter((sale) => new Date(sale.soldAt).getFullYear() === selectedYear),
+    [sales, selectedYear]
+  );
 
-    filteredSales.forEach((sale) => {
+  const purchasesInYear = useMemo(
+    () => purchases.filter((purchase) => new Date(purchase.purchaseDate).getFullYear() === selectedYear),
+    [purchases, selectedYear]
+  );
+
+  const summary = useMemo(() => {
+    const totalSales = salesInYear.reduce((acc, sale) => acc + Number(sale.totalAmount || 0), 0);
+    const totalPurchases = purchasesInYear.reduce(
+      (acc, purchase) => acc + Number(purchase.purchasePrice || 0) * Number(purchase.quantity || 0),
+      0
+    );
+
+    return {
+      totalSales,
+      totalPurchases,
+      estimatedProfit: totalSales - totalPurchases
+    };
+  }, [salesInYear, purchasesInYear]);
+
+  const periodLabels = useMemo(() => (periodMode === "monthly" ? monthKeys : quarterKeys), [periodMode]);
+
+  const bestSellingSeries = useMemo(() => {
+    const medicineTotalMap = {};
+    const medicinePeriodMap = {};
+
+    salesInYear.forEach((sale) => {
+      const soldAt = new Date(sale.soldAt);
+      const periodLabel = periodMode === "monthly" ? monthKeys[soldAt.getMonth()] : `Q${Math.floor(soldAt.getMonth() / 3) + 1}`;
+
       sale.items.forEach((item) => {
-        const medicineName = item.medicineName || "Unknown";
-        const medicineId = String(item.medicine || "");
-        const category = medicineCategoryMap[medicineId] || "Uncategorized";
+        const name = item.medicineName || "Unknown";
+        const qty = Number(item.quantity || 0);
 
-        bestSellingMap[medicineName] = (bestSellingMap[medicineName] || 0) + Number(item.quantity || 0);
-        salesByCategoryMap[category] = (salesByCategoryMap[category] || 0) + Number(item.lineTotal || 0);
+        medicineTotalMap[name] = (medicineTotalMap[name] || 0) + qty;
+
+        if (!medicinePeriodMap[name]) {
+          medicinePeriodMap[name] = {};
+        }
+        medicinePeriodMap[name][periodLabel] = (medicinePeriodMap[name][periodLabel] || 0) + qty;
       });
     });
 
-    const bestSelling = Object.entries(bestSellingMap)
-      .map(([name, quantitySold]) => ({ name, quantitySold }))
-      .sort((a, b) => b.quantitySold - a.quantitySold)
-      .slice(0, 8);
+    const topMedicines = Object.entries(medicineTotalMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name]) => name);
 
-    const salesByCategory = Object.entries(salesByCategoryMap)
-      .map(([category, total]) => ({ category, total }))
-      .sort((a, b) => b.total - a.total);
+    const rows = periodLabels.map((label) => {
+      const row = { period: label };
+      topMedicines.forEach((medicineName) => {
+        row[medicineName] = medicinePeriodMap[medicineName]?.[label] || 0;
+      });
+      return row;
+    });
 
-    const fastMoving = [...bestSelling];
+    return { rows, topMedicines };
+  }, [salesInYear, periodMode, periodLabels]);
 
-    return { bestSelling, salesByCategory, fastMoving };
-  }, [range, sales, medicines]);
+  const salesVsPurchasesSeries = useMemo(() => {
+    const rows = periodLabels.map((label) => ({ period: label, sales: 0, purchases: 0, profit: 0 }));
 
-  if (!analytics) {
-    return <div className="card">Loading dashboard...</div>;
+    const rowForMonth = (monthIndex) => {
+      if (periodMode === "monthly") return rows[monthIndex];
+      return rows[Math.floor(monthIndex / 3)];
+    };
+
+    salesInYear.forEach((sale) => {
+      const date = new Date(sale.soldAt);
+      rowForMonth(date.getMonth()).sales += Number(sale.totalAmount || 0);
+    });
+
+    purchasesInYear.forEach((purchase) => {
+      const date = new Date(purchase.purchaseDate);
+      rowForMonth(date.getMonth()).purchases += Number(purchase.purchasePrice || 0) * Number(purchase.quantity || 0);
+    });
+
+    return rows.map((row) => ({
+      ...row,
+      profit: row.sales - row.purchases
+    }));
+  }, [periodMode, periodLabels, salesInYear, purchasesInYear]);
+
+  if (loading) {
+    return <LoadingState label="Loading dashboard analytics..." />;
   }
 
   return (
     <div className="grid gap-4">
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div className="card">
-          <h3 className="text-base font-semibold">Low Stock</h3>
-          <ul className="mt-2 space-y-1 text-sm">
-            {alerts.lowStock.length > 0 ? (
-              alerts.lowStock.slice(0, 6).map((item) => (
-                <li key={item._id}>{item.medicineName} ({item.quantityInStock})</li>
-              ))
-            ) : (
-              <li className="text-slate-500 dark:text-slate-400">No low stock alerts.</li>
-            )}
-          </ul>
-        </div>
-        <div className="card">
-          <h3 className="text-base font-semibold">Expiring Soon</h3>
-          <ul className="mt-2 space-y-1 text-sm">
-            {alerts.expiringSoon.length > 0 ? (
-              alerts.expiringSoon.slice(0, 6).map((item) => (
-                <li key={item._id}>{item.medicineName} ({shortDate(item.expiryDate)})</li>
-              ))
-            ) : (
-              <li className="text-slate-500 dark:text-slate-400">No expiring medicines right now.</li>
-            )}
-          </ul>
-        </div>
-        <div className="card">
-          <h3 className="text-base font-semibold">Out Of Stock</h3>
-          <ul className="mt-2 space-y-1 text-sm">
-            {alerts.outOfStock.length > 0 ? (
-              alerts.outOfStock.slice(0, 6).map((item) => (
-                <li key={item._id}>{item.medicineName}</li>
-              ))
-            ) : (
-              <li className="text-slate-500 dark:text-slate-400">No out-of-stock medicines.</li>
-            )}
-          </ul>
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Analytics Range</h2>
-          <div className="flex flex-wrap gap-2">
-            {rangeOptions.map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => setRange(option.key)}
-                className={`rounded-lg px-3 py-2 text-sm ${
-                  range === option.key
-                    ? "bg-brand-600 text-white"
-                    : "border border-slate-300 dark:border-slate-600"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+      <section className="relative overflow-hidden rounded-2xl">
+        <img
+          src="https://images.unsplash.com/photo-1471864190281-a93a3070b6de?auto=format&fit=crop&w=1800&q=80"
+          alt="Pharmacy dashboard banner"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-emerald-900/90 via-emerald-800/80 to-slate-900/85" />
+        <div className="relative grid gap-4 p-6 text-white lg:grid-cols-[1.1fr_1fr] lg:items-end">
+          <div>
+            <p className="text-sm uppercase tracking-wide text-emerald-100/90">Dashboard Overview</p>
+            <h1 className="mt-1 text-3xl font-extrabold leading-tight">
+              Welcome back, {user?.name || "Pharmacy Admin"}.
+            </h1>
+            <p className="mt-2 text-sm text-emerald-50/90">
+              Track your business performance for {selectedYear} at a glance.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-white/15 p-3 backdrop-blur">
+              <p className="text-xs uppercase tracking-wide text-emerald-100">Sales</p>
+              <p className="mt-1 text-lg font-bold">{money(summary.totalSales)}</p>
+            </div>
+            <div className="rounded-xl bg-white/15 p-3 backdrop-blur">
+              <p className="text-xs uppercase tracking-wide text-emerald-100">Purchases</p>
+              <p className="mt-1 text-lg font-bold">{money(summary.totalPurchases)}</p>
+            </div>
+            <div className="rounded-xl bg-white/15 p-3 backdrop-blur">
+              <p className="text-xs uppercase tracking-wide text-emerald-100">Profit</p>
+              <p className="mt-1 text-lg font-bold">{money(summary.estimatedProfit)}</p>
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="card h-80">
-          <h2 className="mb-4 text-lg font-semibold">Best Selling Medicines</h2>
-          {periodAnalytics.bestSelling.length > 0 ? (
-            <ResponsiveContainer width="100%" height="85%">
-              <BarChart data={periodAnalytics.bestSelling}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="quantitySold" fill="#15803d" radius={6} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No data in selected period.</p>
-          )}
-        </div>
-
-        <div className="card h-80">
-          <h2 className="mb-4 text-lg font-semibold">Sales By Category</h2>
-          {periodAnalytics.salesByCategory.length > 0 ? (
-            <ResponsiveContainer width="100%" height="85%">
-              <PieChart>
-                <Pie data={periodAnalytics.salesByCategory} dataKey="total" nameKey="category" outerRadius={100} fill="#16a34a" />
-                <Tooltip formatter={(value) => money(value)} />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No data in selected period.</p>
-          )}
-        </div>
+      <section className="grid gap-4 md:grid-cols-3">
+        <StatCard title="Low Stock" value={alerts.lowStock.length} hint="Medicines below minimum stock" />
+        <StatCard title="Expiring Soon" value={alerts.expiringSoon.length} hint="Medicines nearing expiry" />
+        <StatCard title="Out Of Stock" value={alerts.outOfStock.length} hint="Medicines with zero stock" />
       </section>
 
-      <section className="grid gap-4">
-        <div className="card h-80">
-          <h2 className="mb-4 text-lg font-semibold">Fast Moving Medicines</h2>
-          {periodAnalytics.fastMoving.length > 0 ? (
-            <ResponsiveContainer width="100%" height="85%">
-              <BarChart data={periodAnalytics.fastMoving}>
+     
+      <section className="card">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3 dark:border-slate-700">
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Analytics tabs">
+            {analyticsTabs.map((tab) => (
+              <button
+                key={tab.key}
+                role="tab"
+                aria-selected={activeTab === tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`rounded-lg px-3 py-2 text-sm ${
+                  activeTab === tab.key
+                    ? "bg-brand-600 text-white"
+                    : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            {periodTabs.map((period) => (
+              <button
+                key={period.key}
+                role="tab"
+                aria-selected={periodMode === period.key}
+                type="button"
+                onClick={() => setPeriodMode(period.key)}
+                className={`rounded-lg px-3 py-2 text-sm ${
+                  periodMode === period.key
+                    ? "bg-brand-600 text-white"
+                    : "border border-slate-300 dark:border-slate-600"
+                }`}
+              >
+                {period.label}
+              </button>
+            ))}
+
+            <select
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              aria-label="Select analytics year"
+            >
+              {yearOptions.map((year) => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="h-96">
+          {activeTab === "best_selling" ? (
+            bestSellingSeries.topMedicines.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={bestSellingSeries.rows}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="period" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  {bestSellingSeries.topMedicines.map((medicineName, index) => (
+                    <Line
+                      key={medicineName}
+                      type="monotone"
+                      dataKey={medicineName}
+                      stroke={lineColors[index % lineColors.length]}
+                      strokeWidth={3}
+                      dot={{ r: 3 }}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-slate-500 dark:text-slate-400">No best-selling data for selected year.</p>
+            )
+          ) : salesVsPurchasesSeries.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={salesVsPurchasesSeries}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
+                <XAxis dataKey="period" />
                 <YAxis />
-                <Tooltip />
-                <Bar dataKey="quantitySold" fill="#0f766e" radius={6} />
-              </BarChart>
+                <Tooltip formatter={(value) => money(value)} />
+                <Legend />
+                <Line type="monotone" dataKey="sales" stroke="#15803d" strokeWidth={3} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="purchases" stroke="#b45309" strokeWidth={3} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="profit" stroke="#0f172a" strokeWidth={3} dot={{ r: 3 }} />
+              </LineChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No data in selected period.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">No sales/purchase data for selected period.</p>
           )}
         </div>
       </section>

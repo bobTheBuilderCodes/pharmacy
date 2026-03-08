@@ -7,6 +7,7 @@ import MedicinesPage from "./pages/MedicinesPage";
 import SalesPage from "./pages/SalesPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchasesPage from "./pages/PurchasesPage";
+import SettingsPage from "./pages/SettingsPage";
 
 const ProtectedShell = ({ children }) => (
   <ProtectedRoute>
@@ -54,6 +55,14 @@ const App = () => (
       element={
         <ProtectedShell>
           <PurchasesPage />
+        </ProtectedShell>
+      }
+    />
+    <Route
+      path="/settings"
+      element={
+        <ProtectedShell>
+          <SettingsPage />
         </ProtectedShell>
       }
     />

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import Spinner from "../components/Spinner";
 import Modal from "../components/Modal";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal";
+import { useToast } from "../context/ToastContext";
 import { shortDate } from "../utils/format";
 
 const initialForm = {
@@ -27,11 +30,23 @@ const MedicinesPage = () => {
   const [form, setForm] = useState(initialForm);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMedicineId, setEditingMedicineId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const { showToast } = useToast();
 
   const load = async () => {
-    const [medRes, supRes] = await Promise.all([api.get("/medicines"), api.get("/suppliers")]);
-    setMedicines(medRes.data);
-    setSuppliers(supRes.data);
+    try {
+      setLoading(true);
+      const [medRes, supRes] = await Promise.all([api.get("/medicines"), api.get("/suppliers")]);
+      setMedicines(medRes.data);
+      setSuppliers(supRes.data);
+    } catch {
+      showToast("Failed to load medicines.", "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -75,21 +90,44 @@ const MedicinesPage = () => {
       minimumStockLevel: Number(form.minimumStockLevel)
     };
 
-    if (editingMedicineId) {
-      await api.put(`/medicines/${editingMedicineId}`, payload);
-    } else {
-      await api.post("/medicines", payload);
-    }
+    try {
+      setSubmitting(true);
+      if (editingMedicineId) {
+        await api.put(`/medicines/${editingMedicineId}`, payload);
+        showToast("Medicine updated successfully.", "success");
+      } else {
+        await api.post("/medicines", payload);
+        showToast("Medicine added successfully.", "success");
+      }
 
-    setForm(initialForm);
-    setEditingMedicineId(null);
-    setIsModalOpen(false);
-    await load();
+      setForm(initialForm);
+      setEditingMedicineId(null);
+      setIsModalOpen(false);
+      await load();
+    } catch (error) {
+      showToast(error.response?.data?.message || "Failed to save medicine.", "error");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleDelete = async (id) => {
-    await api.delete(`/medicines/${id}`);
-    await load();
+  const requestDelete = (medicine) => {
+    setPendingDelete({ id: medicine._id, name: medicine.medicineName });
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete?.id) return;
+    try {
+      setDeletingId(pendingDelete.id);
+      await api.delete(`/medicines/${pendingDelete.id}`);
+      showToast("Medicine deleted.", "success");
+      await load();
+    } catch (error) {
+      showToast(error.response?.data?.message || "Failed to delete medicine.", "error");
+    } finally {
+      setDeletingId("");
+      setPendingDelete(null);
+    }
   };
 
   const filtered = useMemo(
@@ -122,7 +160,16 @@ const MedicinesPage = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td className="p-6" colSpan={7}>
+                    <div className="flex items-center justify-center gap-2">
+                      <Spinner />
+                      <span className="text-sm text-slate-500 dark:text-slate-400">Loading medicines...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : filtered.length > 0 ? (
                 filtered.map((item) => (
                   <tr key={item._id} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="p-2">{item.medicineName}</td>
@@ -133,11 +180,11 @@ const MedicinesPage = () => {
                     <td className="p-2">{item.supplier?.supplierName || "-"}</td>
                     <td className="p-2">
                       <div className="flex gap-2">
-                        <button className="button-muted" onClick={() => openEditModal(item)} type="button">
+                        <button className="button-muted" onClick={() => openEditModal(item)} type="button" disabled={submitting || !!deletingId}>
                           Edit
                         </button>
-                        <button className="button-muted" onClick={() => handleDelete(item._id)} type="button">
-                          Delete
+                        <button className="button-muted" onClick={() => requestDelete(item)} type="button" disabled={submitting || !!deletingId}>
+                          {deletingId === item._id ? "Deleting..." : "Delete"}
                         </button>
                       </div>
                     </td>
@@ -216,11 +263,20 @@ const MedicinesPage = () => {
             <label className="mb-1 block text-sm font-medium">Barcode / SKU</label>
             <input className="input" value={form.barcodeSku} onChange={(e) => setForm({ ...form, barcodeSku: e.target.value })} />
           </div>
-          <button className="button md:col-span-2" type="submit">
-            {editingMedicineId ? "Update Medicine" : "Save Medicine"}
+          <button className="button md:col-span-2" type="submit" disabled={submitting}>
+            {submitting ? "Saving..." : editingMedicineId ? "Update Medicine" : "Save Medicine"}
           </button>
         </form>
       </Modal>
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(pendingDelete)}
+        title="Delete Medicine"
+        message={`Are you sure you want to delete ${pendingDelete?.name || "this medicine"}?`}
+        loading={Boolean(deletingId)}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 };

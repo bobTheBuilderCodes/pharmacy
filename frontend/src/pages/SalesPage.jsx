@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import Modal from "../components/Modal";
+import Spinner from "../components/Spinner";
 import StatCard from "../components/StatCard";
+import { useToast } from "../context/ToastContext";
 import { money, shortDate } from "../utils/format";
 
 const paymentLabel = {
@@ -21,11 +23,21 @@ const SalesPage = () => {
   const [selectedMedicineId, setSelectedMedicineId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [saleError, setSaleError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const { showToast } = useToast();
 
   const load = async () => {
-    const [medRes, salesRes] = await Promise.all([api.get("/medicines"), api.get("/sales")]);
-    setMedicines(medRes.data);
-    setSales(salesRes.data);
+    try {
+      setLoading(true);
+      const [medRes, salesRes] = await Promise.all([api.get("/medicines"), api.get("/sales")]);
+      setMedicines(medRes.data);
+      setSales(salesRes.data);
+    } catch {
+      showToast("Failed to load sales.", "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -105,20 +117,28 @@ const SalesPage = () => {
       return;
     }
 
-    await api.post("/sales", {
-      items: [{ medicineId: selectedMedicine._id, quantity: qty }],
-      discount: Number(discount || 0),
-      paymentMethod
-    });
+    try {
+      setSubmitting(true);
+      await api.post("/sales", {
+        items: [{ medicineId: selectedMedicine._id, quantity: qty }],
+        discount: Number(discount || 0),
+        paymentMethod
+      });
 
-    setDiscount(0);
-    setPaymentMethod("cash");
-    setMedicineQuery("");
-    setSelectedMedicineId("");
-    setQuantity(1);
-    setSaleError("");
-    setIsAddOpen(false);
-    await load();
+      showToast("Sale completed successfully.", "success");
+      setDiscount(0);
+      setPaymentMethod("cash");
+      setMedicineQuery("");
+      setSelectedMedicineId("");
+      setQuantity(1);
+      setSaleError("");
+      setIsAddOpen(false);
+      await load();
+    } catch (error) {
+      showToast(error.response?.data?.message || "Failed to complete sale.", "error");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -133,17 +153,18 @@ const SalesPage = () => {
       <div className="card mt-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Recent Sales</h2>
-          <div className="flex items-center gap-2">
-            <select className="input" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
-              <option value="all">All Payments</option>
-              <option value="cash">Cash</option>
-              <option value="mobile_money">Mobile Money</option>
-              <option value="card">Card</option>
-            </select>
-            <button className="button" type="button" onClick={openSaleModal}>
-              Add Sale
-            </button>
-          </div>
+          <button className="button" type="button" onClick={openSaleModal} disabled={submitting}>
+            Add Sale
+          </button>
+        </div>
+        <div className="mb-3 max-w-xs">
+          <label className="mb-1 block text-sm font-medium">Payment Filter</label>
+          <select className="input" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+            <option value="all">All Payments</option>
+            <option value="cash">Cash</option>
+            <option value="mobile_money">Mobile Money</option>
+            <option value="card">Card</option>
+          </select>
         </div>
 
         <div className="overflow-x-auto">
@@ -159,7 +180,16 @@ const SalesPage = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredSales.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td className="p-6" colSpan={6}>
+                    <div className="flex items-center justify-center gap-2">
+                      <Spinner />
+                      <span className="text-sm text-slate-500 dark:text-slate-400">Loading sales...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredSales.length > 0 ? (
                 filteredSales.map((sale) => (
                   <tr key={sale._id} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="p-2">{sale.saleId}</td>
@@ -237,8 +267,8 @@ const SalesPage = () => {
 
           {saleError ? <p className="md:col-span-2 text-sm text-red-600">{saleError}</p> : null}
 
-          <button className="button md:col-span-2" onClick={createSale} type="button">
-            Complete Sale
+          <button className="button md:col-span-2" onClick={createSale} type="button" disabled={submitting}>
+            {submitting ? "Processing..." : "Complete Sale"}
           </button>
         </div>
       </Modal>
