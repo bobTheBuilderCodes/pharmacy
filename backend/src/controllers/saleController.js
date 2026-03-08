@@ -1,6 +1,15 @@
 import { Sale } from "../models/Sale.js";
 import { Medicine } from "../models/Medicine.js";
-import { generateCode } from "../utils/id.js";
+
+const generateFiveDigitSaleId = async () => {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = String(Math.floor(Math.random() * 90000) + 10000);
+    const exists = await Sale.exists({ saleId: candidate });
+    if (!exists) return candidate;
+  }
+
+  return String(Date.now()).slice(-5);
+};
 
 export const createSale = async (req, res, next) => {
   const session = await Sale.startSession();
@@ -48,11 +57,12 @@ export const createSale = async (req, res, next) => {
     }
 
     const totalAmount = Math.max(grossTotal - Number(discount || 0), 0);
+    const saleId = await generateFiveDigitSaleId();
 
     const sale = await Sale.create(
       [
         {
-          saleId: generateCode("SALE"),
+          saleId,
           items: saleItems,
           discount,
           totalAmount,

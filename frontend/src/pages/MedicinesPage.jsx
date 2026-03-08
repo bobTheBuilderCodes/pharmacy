@@ -147,7 +147,7 @@ const MedicinesPage = () => {
         <input className="input mb-3 max-w-sm" placeholder="Search medicine" value={search} onChange={(e) => setSearch(e.target.value)} />
 
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
+          <table className="table-enhanced">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700">
                 <th className="p-2">Medicine</th>

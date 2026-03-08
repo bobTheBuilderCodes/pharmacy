@@ -99,7 +99,7 @@ const PurchasesPage = () => {
       />
 
       <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
+        <table className="table-enhanced">
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-700">
               <th className="p-2">Purchase ID</th>

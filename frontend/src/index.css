@@ -30,3 +30,25 @@ body {
 .button-muted {
   @apply rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600;
 }
+
+.table-enhanced {
+  @apply min-w-full text-left text-sm border-separate;
+  border-spacing: 0;
+}
+
+.table-enhanced th,
+.table-enhanced td {
+  padding: 0.85rem 1rem;
+}
+
+.table-enhanced thead th {
+  @apply bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100;
+}
+
+.table-enhanced tbody tr:nth-child(odd) td {
+  @apply bg-white dark:bg-slate-800;
+}
+
+.table-enhanced tbody tr:nth-child(even) td {
+  @apply bg-slate-50 dark:bg-slate-900/50;
+}
